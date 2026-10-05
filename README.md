@@ -50,7 +50,8 @@ powershell -ExecutionPolicy Bypass -File .\Add-ClaudeCodeTerminalProfile.ps1
 | `-StartingDirectory` | `%USERPROFILE%` | Folder the tab opens in |
 | `-Icon` | ✳ emoji | Path to an `.ico` or `.png` file |
 | `-Direct` | off | Runs `claude.exe` on its own, so the tab closes when Claude exits. Without this option, Claude runs inside PowerShell and the tab stays open after you exit. |
-| `-Remove` | — | Removes the profile |
+| `-SkipClaudeSettings` | off | Leaves `%USERPROFILE%\.claude\settings.json` untouched |
+| `-Remove` | — | Removes the profile and the `CLAUDE_CODE_DISABLE_TERMINAL_TITLE` setting |
 
 ## Uninstall
 
@@ -69,6 +70,16 @@ The script writes `claude-code.json` to the following folder:
 ```
 
 Windows Terminal loads this file at startup. The profile has a fixed GUID, so running the script again updates the existing profile instead of adding a duplicate.
+
+The script also adds this to the `env` section of your Claude Code user settings at `%USERPROFILE%\.claude\settings.json`:
+
+```json
+"env": {
+  "CLAUDE_CODE_DISABLE_TERMINAL_TITLE": "1"
+}
+```
+
+This stops Claude Code from changing the tab title, so the tab keeps the profile name. Your other settings are kept, and the previous file is saved as `settings.json.bak`. If the file isn't valid JSON, the script leaves it unchanged and prints a warning.
 
 ## License
 
