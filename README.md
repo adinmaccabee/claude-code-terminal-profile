@@ -24,7 +24,7 @@ To pass options when installing this way:
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/adinmaccabee/claude-code-terminal-profile/main/Add-ClaudeCodeTerminalProfile.ps1))) -StartingDirectory "C:\Code"
 ```
 
-After either command, restart Windows Terminal.
+After either command, close every Windows Terminal window and open it again.
 
 > Piping a script from the internet into `iex` runs it immediately. You should [read the script](Add-ClaudeCodeTerminalProfile.ps1) before you run it.
 
@@ -48,10 +48,17 @@ powershell -ExecutionPolicy Bypass -File .\Add-ClaudeCodeTerminalProfile.ps1
 |---|---|---|
 | `-Name` | `Claude Code` | Profile name shown in Windows Terminal |
 | `-StartingDirectory` | `%USERPROFILE%` | Folder the tab opens in |
-| `-Icon` | ✳ emoji | Path to an `.ico` or `.png` file |
+| `-Icon` | Claude Code icon | Path to your own `.ico` or `.png` file |
+| `-IconUrl` | [uxwing.com Claude Code icon](https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/claude-code-icon.png) | Where to download the icon from. If the download fails, the profile uses a ✳ emoji instead. |
 | `-Direct` | off | Runs `claude.exe` on its own, so the tab closes when Claude exits. Without this option, Claude runs inside PowerShell and the tab stays open after you exit. |
 | `-SkipClaudeSettings` | off | Leaves `%USERPROFILE%\.claude\settings.json` untouched |
 | `-Remove` | — | Removes the profile and the `CLAUDE_CODE_DISABLE_TERMINAL_TITLE` setting |
+
+## Updating
+
+Run the script again. It removes the existing profile and its icon, then installs them fresh, so new options or a new icon always take effect. Close every Windows Terminal window afterwards; it only reads profiles when it starts.
+
+If the icon still doesn't change, Windows Terminal's own `settings.json` probably sets an icon for this profile, for example because it was changed in the Settings UI. That setting overrides the script, and the script prints a warning when it finds one. Remove the `"icon"` line from the Claude Code profile in `settings.json`, or reset the icon in Settings.
 
 ## Uninstall
 
@@ -63,13 +70,13 @@ You can also delete this folder: `%LOCALAPPDATA%\Microsoft\Windows Terminal\Frag
 
 ## How it works
 
-The script writes `claude-code.json` to the following folder:
+The script writes `claude-code.json` and the downloaded icon to the following folder:
 
 ```
 %LOCALAPPDATA%\Microsoft\Windows Terminal\Fragments\ClaudeCode\
 ```
 
-Windows Terminal loads this file at startup. The profile has a fixed GUID, so running the script again updates the existing profile instead of adding a duplicate.
+Windows Terminal loads this file at startup. The profile has a fixed GUID, so running the script again replaces the existing profile instead of adding a duplicate. The icon's file name includes a short hash of the image, so a new icon always gets a new path and Windows Terminal can't show a cached copy of the old one.
 
 The script also adds this to the `env` section of your Claude Code user settings at `%USERPROFILE%\.claude\settings.json`:
 

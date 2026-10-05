@@ -11,6 +11,9 @@
     stays open as a normal shell after you quit Claude. Use -Direct to run
     claude.exe on its own (the tab closes when Claude exits).
 
+    Running the script again uninstalls the existing profile first and then
+    installs it fresh, so changes such as a new icon always take effect.
+
     It also sets CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 in the "env" section of
     %USERPROFILE%\.claude\settings.json, so Claude Code doesn't overwrite the
     tab title. Existing settings are kept and the old file is saved as
@@ -40,7 +43,8 @@
 param(
     [string]$Name = 'Claude Code',
     [string]$StartingDirectory = '%USERPROFILE%',
-    [string]$Icon,                 # path to an .ico/.png; defaults to an emoji
+    [string]$Icon,                 # path to your own .ico/.png; overrides -IconUrl
+    [string]$IconUrl = 'https://uxwing.com/wp-content/themes/uxwing/download/brands-and-social-media/claude-code-icon.png',
     [switch]$Direct,               # launch claude.exe directly, no wrapping shell
     [switch]$SkipClaudeSettings,   # don't touch ~/.claude/settings.json
     [switch]$Remove
@@ -78,9 +82,37 @@ $writeClaudeSettings = {
     [IO.File]::WriteAllText($claudeSettingsFile, ($Settings | ConvertTo-Json -Depth 100), $utf8NoBom)
 }
 
+# Deletes the fragment folder: the profile and its downloaded icon.
+# Returns $true if there was anything to delete.
+$removeFragment = {
+    if (-not (Test-Path $fragmentDir)) { return $false }
+    Remove-Item $fragmentDir -Recurse -Force
+    return $true
+}
+
+# Windows Terminal's own settings.json can hold an "icon" for this profile
+# (for example if it was changed in the Settings UI). That always wins over
+# the fragment, so warn about it rather than silently "not working".
+$warnAboutIconOverrides = {
+    $candidates = @(Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\settings.json')
+    $packages = Join-Path $env:LOCALAPPDATA 'Packages'
+    if (Test-Path $packages) {
+        $candidates += Get-ChildItem $packages -Directory -Filter 'Microsoft.WindowsTerminal*' -ErrorAction SilentlyContinue |
+            ForEach-Object { Join-Path $_.FullName 'LocalState\settings.json' }
+    }
+    foreach ($file in $candidates) {
+        if (-not (Test-Path $file)) { continue }
+        try { $wt = [IO.File]::ReadAllText($file) | ConvertFrom-Json } catch { continue }  # 5.1 can't read comments
+        $list = if ($wt.profiles.PSObject.Properties['list']) { $wt.profiles.list } else { $wt.profiles }
+        $match = @($list) | Where-Object { $_.guid -eq $profileGuid -and $_.PSObject.Properties['icon'] }
+        if ($match) {
+            Write-Warning "$file sets its own icon for '$Name', which overrides this script's icon. Remove the `"icon`" line from that profile (or reset it in Settings) to use the new one."
+        }
+    }
+}
+
 if ($Remove) {
-    if (Test-Path $fragmentDir) {
-        Remove-Item $fragmentDir -Recurse -Force
+    if (& $removeFragment) {
         Write-Host "Removed the '$Name' profile. Restart Windows Terminal to apply." -ForegroundColor Green
     } else {
         Write-Host "No Claude Code profile fragment found; nothing to remove."
@@ -124,9 +156,36 @@ if ($Direct) {
     $commandline = "$shellExe -NoLogo -NoExit -Command `"& '$claudePath'`""
 }
 
-# --- Write the fragment ---------------------------------------------------
-if (-not $Icon) { $Icon = [char]::ConvertFromUtf32(0x2733) }  # ✳ emoji
+# --- Uninstall any existing profile, then install fresh ------------------
+if (& $removeFragment) {
+    Write-Host "Removed the existing '$Name' profile; reinstalling."
+}
+New-Item -ItemType Directory -Path $fragmentDir -Force | Out-Null
 
+# Download the icon next to the fragment, unless the user passed their own -Icon.
+# The file name includes a hash of the image, so a different icon gets a
+# different path. Windows Terminal caches icons by path, so reusing one name
+# can leave the old picture on screen.
+if (-not $Icon -and $IconUrl) {
+    $download = Join-Path $fragmentDir 'download.tmp'
+    try {
+        # Windows PowerShell 5.1 may not enable TLS 1.2 by default
+        [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $IconUrl -OutFile $download -UseBasicParsing
+        $hash = (Get-FileHash $download -Algorithm SHA256).Hash.Substring(0, 8).ToLowerInvariant()
+        $ext = [IO.Path]::GetExtension(([uri]$IconUrl).AbsolutePath)
+        if (-not $ext) { $ext = '.png' }
+        $iconFile = Join-Path $fragmentDir "claude-code-$hash$ext"
+        Move-Item $download $iconFile -Force
+        $Icon = $iconFile
+    } catch {
+        if (Test-Path $download) { Remove-Item $download -Force }
+        Write-Warning "Couldn't download the icon from $IconUrl ($($_.Exception.Message)). Using an emoji instead."
+    }
+}
+if (-not $Icon) { $Icon = [char]::ConvertFromUtf32(0x2733) }  # fallback: eight-spoked asterisk emoji
+
+# --- Write the fragment ---------------------------------------------------
 $wtProfile = [ordered]@{
     guid              = $profileGuid
     name              = $Name
@@ -137,7 +196,6 @@ $wtProfile = [ordered]@{
 }
 $fragment = @{ profiles = @($wtProfile) }
 
-New-Item -ItemType Directory -Path $fragmentDir -Force | Out-Null
 $json = $fragment | ConvertTo-Json -Depth 5
 [IO.File]::WriteAllText($fragmentFile, $json, $utf8NoBom)
 
@@ -155,5 +213,8 @@ if (-not $SkipClaudeSettings) {
         Write-Host "Set $envVarName=1 in $claudeSettingsFile"
     }
 }
+
+& $warnAboutIconOverrides
+
 Write-Host "Fragment: $fragmentFile"
-Write-Host "Restart Windows Terminal, then pick '$Name' from the new-tab dropdown."
+Write-Host "Close every Windows Terminal window, then reopen it and pick '$Name' from the new-tab dropdown."
