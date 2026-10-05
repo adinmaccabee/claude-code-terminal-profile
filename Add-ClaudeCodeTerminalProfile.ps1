@@ -171,10 +171,21 @@ if (-not $Icon -and $IconUrl) {
     try {
         # Windows PowerShell 5.1 may not enable TLS 1.2 by default
         [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $IconUrl -OutFile $download -UseBasicParsing
+        # Some sites turn away PowerShell's default user agent, so ask like a browser
+        $ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36'
+        Invoke-WebRequest -Uri $IconUrl -OutFile $download -UseBasicParsing -UserAgent $ua
+
+        # A blocked request can still "succeed" with an HTML error page, which
+        # Windows Terminal can't draw. Only accept real PNG, ICO or JPEG data.
+        $stream = [IO.File]::OpenRead($download)
+        try { $head = New-Object byte[] 4; $null = $stream.Read($head, 0, 4) } finally { $stream.Dispose() }
+        $ext = if ($head[0] -eq 0x89 -and $head[1] -eq 0x50 -and $head[2] -eq 0x4E -and $head[3] -eq 0x47) { '.png' }
+               elseif ($head[0] -eq 0 -and $head[1] -eq 0 -and $head[2] -eq 1 -and $head[3] -eq 0) { '.ico' }
+               elseif ($head[0] -eq 0xFF -and $head[1] -eq 0xD8) { '.jpg' }
+               else { $null }
+        if (-not $ext) { throw "the file it returned isn't a PNG, ICO or JPEG image" }
+
         $hash = (Get-FileHash $download -Algorithm SHA256).Hash.Substring(0, 8).ToLowerInvariant()
-        $ext = [IO.Path]::GetExtension(([uri]$IconUrl).AbsolutePath)
-        if (-not $ext) { $ext = '.png' }
         $iconFile = Join-Path $fragmentDir "claude-code-$hash$ext"
         Move-Item $download $iconFile -Force
         $Icon = $iconFile
@@ -184,6 +195,11 @@ if (-not $Icon -and $IconUrl) {
     }
 }
 if (-not $Icon) { $Icon = [char]::ConvertFromUtf32(0x2733) }  # fallback: eight-spoked asterisk emoji
+if ($Icon.Length -le 2) {
+    Write-Host "Icon: the asterisk emoji (no image)." -ForegroundColor Yellow
+} else {
+    Write-Host "Icon: $Icon"
+}
 
 # --- Write the fragment ---------------------------------------------------
 $wtProfile = [ordered]@{
