@@ -24,7 +24,7 @@ To pass options when installing this way:
 & ([scriptblock]::Create((irm https://raw.githubusercontent.com/adinmaccabee/claude-code-terminal-profile/main/Add-ClaudeCodeTerminalProfile.ps1))) -StartingDirectory "C:\Code"
 ```
 
-After either command, close every Windows Terminal window and open it again.
+Any open Windows Terminal windows pick up the new profile within a few seconds. There's no need to restart.
 
 > Piping a script from the internet into `iex` runs it immediately. You should [read the script](Add-ClaudeCodeTerminalProfile.ps1) before you run it.
 
@@ -56,7 +56,9 @@ powershell -ExecutionPolicy Bypass -File .\Add-ClaudeCodeTerminalProfile.ps1
 
 ## Updating
 
-Run the script again. It removes the existing profile and its icon, then installs them fresh, so new options or a new icon always take effect. Close every Windows Terminal window afterwards; it only reads profiles when it starts.
+Run the script again. It removes the existing profile and its icon, then installs them fresh, so new options or a new icon always take effect.
+
+Open Windows Terminal windows reload automatically. Terminal only watches its own `settings.json` for changes, not the fragments folder, so the script updates that file's modified time without changing its contents. That makes Terminal reload its settings, fragments included. This works for the Stable, Preview, Canary and unpackaged builds, and for a development build compiled from source.
 
 If the icon still doesn't change, Windows Terminal's own `settings.json` probably sets an icon for this profile, for example because it was changed in the Settings UI. That setting overrides the script, and the script prints a warning when it finds one. Remove the `"icon"` line from the Claude Code profile in `settings.json`, or reset the icon in Settings.
 

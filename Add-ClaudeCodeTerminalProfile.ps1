@@ -13,6 +13,9 @@
 
     Running the script again uninstalls the existing profile first and then
     installs it fresh, so changes such as a new icon always take effect.
+    Open Windows Terminal windows reload automatically: the script updates
+    the modified time of Terminal's settings.json (not its contents), which
+    is what Terminal watches for.
 
     It also sets CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1 in the "env" section of
     %USERPROFILE%\.claude\settings.json, so Claude Code doesn't overwrite the
@@ -90,18 +93,42 @@ $removeFragment = {
     return $true
 }
 
+# Every Windows Terminal settings.json on this machine: the unpackaged one,
+# plus one per installed package (Stable, Preview, Canary, and the
+# "WindowsTerminalDev" package a build from source installs as).
+$findTerminalSettings = {
+    $candidates = @(Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\settings.json')
+    $packages = Join-Path $env:LOCALAPPDATA 'Packages'
+    if (Test-Path $packages) {
+        $candidates += Get-ChildItem $packages -Directory -Filter '*WindowsTerminal*' -ErrorAction SilentlyContinue |
+            ForEach-Object { Join-Path $_.FullName 'LocalState\settings.json' }
+    }
+    $candidates | Where-Object { Test-Path $_ }
+}
+
+# Windows Terminal only watches its own settings.json for changes; nothing
+# watches the Fragments folder. But every reload re-reads the fragments too,
+# so bumping settings.json's modified time makes any open Terminal pick up
+# the new profile straight away, with no restart. The file's contents are
+# not touched.
+$reloadTerminals = {
+    $reloaded = $false
+    foreach ($file in & $findTerminalSettings) {
+        try {
+            (Get-Item $file).LastWriteTime = Get-Date
+            $reloaded = $true
+        } catch {
+            Write-Warning "Couldn't nudge $file to reload ($($_.Exception.Message))."
+        }
+    }
+    return $reloaded
+}
+
 # Windows Terminal's own settings.json can hold an "icon" for this profile
 # (for example if it was changed in the Settings UI). That always wins over
 # the fragment, so warn about it rather than silently "not working".
 $warnAboutIconOverrides = {
-    $candidates = @(Join-Path $env:LOCALAPPDATA 'Microsoft\Windows Terminal\settings.json')
-    $packages = Join-Path $env:LOCALAPPDATA 'Packages'
-    if (Test-Path $packages) {
-        $candidates += Get-ChildItem $packages -Directory -Filter 'Microsoft.WindowsTerminal*' -ErrorAction SilentlyContinue |
-            ForEach-Object { Join-Path $_.FullName 'LocalState\settings.json' }
-    }
-    foreach ($file in $candidates) {
-        if (-not (Test-Path $file)) { continue }
+    foreach ($file in & $findTerminalSettings) {
         try { $wt = [IO.File]::ReadAllText($file) | ConvertFrom-Json } catch { continue }  # 5.1 can't read comments
         $list = if ($wt.profiles.PSObject.Properties['list']) { $wt.profiles.list } else { $wt.profiles }
         $match = @($list) | Where-Object { $_.guid -eq $profileGuid -and $_.PSObject.Properties['icon'] }
@@ -113,7 +140,8 @@ $warnAboutIconOverrides = {
 
 if ($Remove) {
     if (& $removeFragment) {
-        Write-Host "Removed the '$Name' profile. Restart Windows Terminal to apply." -ForegroundColor Green
+        Write-Host "Removed the '$Name' profile." -ForegroundColor Green
+        if (-not (& $reloadTerminals)) { Write-Host "Restart Windows Terminal to apply." }
     } else {
         Write-Host "No Claude Code profile fragment found; nothing to remove."
     }
@@ -233,4 +261,8 @@ if (-not $SkipClaudeSettings) {
 & $warnAboutIconOverrides
 
 Write-Host "Fragment: $fragmentFile"
-Write-Host "Close every Windows Terminal window, then reopen it and pick '$Name' from the new-tab dropdown."
+if (& $reloadTerminals) {
+    Write-Host "Open Windows Terminal windows will reload within a few seconds. Pick '$Name' from the new-tab dropdown."
+} else {
+    Write-Host "Start Windows Terminal (or close every window and reopen it), then pick '$Name' from the new-tab dropdown."
+}
